@@ -1,0 +1,69 @@
+---
+- hosts: ios
+  gather_facts: no
+  connection: local
+ 
+  vars:
+  tasks:
+  - name: OBTAIN LOGIN CREDENTIALS
+    include_vars: secrets.yaml
+ 
+  - name: DEFINE PROVIDER
+    set_fact:
+      provider:
+        host: "{{ inventory_hostname }}"
+        username: "{{ creds['username'] }}"
+        password: "{{ creds['password'] }}"
+        auth_pass: "{{ creds['auth_pass'] }}"
+ 
+  # Collect all facts from the device - this helps set the hostname
+  - ios_facts:
+      gather_subset:
+        - config
+      provider: "{{ provider }}"
+    register: ios_facts_out
+  #- debug: var=ios_facts_out
+
+  # Network To Code module to grab inventory data
+  - name: Show Inventory
+    ntc_show_command:
+      connection: "{{ var_connection }}"
+      template_dir: /home/runmosta/project/Ansible/ntc-templates/templates
+      platform: "{{ var_platform }}"
+      port: "{{ var_port }}"
+      command: 'show inventory'
+      host: "{{ inventory_hostname }}"
+      username: "{{ provider.username }}"
+      password: "{{ provider.password }}"
+    register: results
+
+  #  - debug: var=results.response
+
+  - name: Bundle data in a new hash, but only if Serial is not blank.
+    set_fact:
+     inventory: "{{ inventory|default([]) + [ {'hostname': ansible_net_hostname, 'ip': inventory_hostname, 'name': item.descr, 'serial': item.sn, 'version': ansible_net_version } ] }}"
+    with_items: "{{ results.response }}"
+    when: item.sn != ''
+
+   #- name: Debug Check if you want
+   #  debug: var=inventory
+
+   # Write Headers for Cisco My Devices - hostname,IP,ProductID,serial
+  - name: Write mydevices.csv
+    run_once: true
+    shell: echo Serial Number,Device Name,Tags,Notes >> {{ path_prefix }}mydevices.csv
+    with_items: "{{ inventory }}"
+
+  - name: Write My Devices CSV File
+    shell: 'echo {{ item.serial }},{{ item.hostname }},"IP-"{{ item.ip }} "|" "IOS-{{ item.version }}", >> {{ path_prefix }}mydevices.csv'
+    with_items: "{{ inventory }}"
+   
+#  - name: RUN " collect ios_facts "
+#    ios_facts:
+#      gather_subset:
+#        - hardware
+#      provider: "{{ provider }}"
+#    register: ios_facts_out
+#  - copy:  
+#      content: "{{ ios_facts_out | to_nice_json }}"
+#      dest: "Inventory/{{ inventory_hostname }}_iosfacts.json"
